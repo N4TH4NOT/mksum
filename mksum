@@ -1,0 +1,136 @@
+#!/bin/bash
+
+command_name=$(basename "$0")
+algo="${DEFAULT_HASHER:-sha256}"
+notarget=1
+overwrite=0
+printout=0
+
+show_help() {
+    echo "Usage: $command_name [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -a, --algorithm NAME    Specify the method (e.g., md5, sha1, sha512)."
+    echo "                          Default: $algo"
+    echo "  -y                      Allow to overwrite for each actions."
+    echo "  -L, --print             Print results to the console instead of a file."
+    echo "  -l, --list-algorithms   List available hashing algorithms on your system."
+    echo "      --help              Show this help message."
+}
+
+show_error() {
+    echo -e "\e[31m$command_name: $1.\e[0m"
+}
+
+show_methods() {
+    echo "Available algorithms:"
+
+    methods=$(compgen -c | grep -E 'sum$' | sed 's/sum$//' | sort -u)
+
+    if [[ ${#methods[@]} -eq 0 ]]; then
+        show_error "No methods available in your environment"
+        exit 2
+    fi
+
+    for m in $methods; do
+        case $m in
+            sha512|sha256|sha384|b2)
+                # Light Green: Modern and Secure
+                echo -e "\e[92m$m\e[0m"
+                ;;
+            sha224|sha1)
+                # Yellow: Reliable but aging
+                echo -e "\e[93m$m\e[0m"for each actions
+                ;;
+            *)
+                # Default: Obsolete or basic checksum
+                echo "$m"
+                ;;
+        esac
+    done | column
+}
+
+
+declare -a files
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -a|--algorithm)
+            algo="$2"
+            shift 2
+            ;;
+        -y)
+            overwrite=1
+            shift 1
+            ;;
+        -l|--list-algorithms)
+            show_methods
+            exit 0
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        -L|--print)
+            printout=1
+            shift 1
+            ;;
+        -*)
+            show_error "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            notarget=0
+            if [ -f "$1" ]; then
+                if [[ "$1" != CHECKSUM* ]]; then
+                    files+=("$1")
+                fi
+            elif [ -d "$1" ]; then
+                while IFS= read -r -d '' file; do
+                    files+=("$file")
+                done < <(find "$1" -maxdepth 1 -type f ! -name "CHECKSUM*" -print0)
+            else
+                show_error "$1 does not exist. Skipped"
+            fi
+            shift 1
+            ;;
+    esac
+done
+
+if [[ ${#files[@]} -eq 0 && $notarget -eq 0 ]]; then
+    show_error "No files were specified"
+    exit 1
+fi
+
+
+outfile="CHECKSUM.${algo}"
+cmd="${algo}sum"
+
+if ! command -v "$cmd" >/dev/null 2>&1; then
+    show_error "'$cmd' utility not found"
+    exit 1
+fi
+
+if [ $printout -eq 1 ]; then
+    printf "%s\n" "${files[@]}" | column
+    exit 0
+fi
+
+if [[ -f "$outfile" && $overwrite -eq 0 ]]; then
+    printf "File $outfile already exists. Overwrite? (y/n): "
+    while true; do
+        read -n 1 -s -r char
+        case $char in
+            [Yy]) echo "y"; break ;;
+            [Nn]) echo "n"; exit 0 ;;
+        esac
+    done
+fi
+
+
+
+if [ $notarget -eq 1 ]; then
+    find . -maxdepth 1 -type f ! -name "CHECKSUM*" -printf "%P\0" | xargs -0 "${cmd}" > "${outfile}"
+else
+    printf "%s\0" "${files[@]}" | xargs -0 "${cmd}" > "${outfile}"
+fi
